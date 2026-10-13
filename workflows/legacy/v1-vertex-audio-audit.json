@@ -1,0 +1,621 @@
+{
+  "name": "[ETL Pipeline] Vertex AI Audio Audit",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "[ETL Pipeline] Vertex AI Audio Audit\nАвтоматизований асинхронний конвеєр для аудиту великих аудіо-датасетів (150k+ записів).\n\nExtract: Ingest даних безпосередньо з GDrive у GCS через rclone (повний обхід оперативної пам'яті n8n).\n\nTransform: Нарізка датасету на JSONL-чанки (по 5000 рядків). Формування промптів для LLM.\n\nLoad/Process: Асинхронна пакетна обробка (Batch Prediction) через Google Vertex AI (Gemini 2.5 Flash) з механізмом полінгу статусів.\n\nDelivery: Парсинг відповідей (Python Pandas), збірка фінального CSV, експорт на GDrive та відправка HTML-звіту.\n\nInfrastructure: Zero-waste архітектура. Ідемпотентність запусків за рахунок динамічних бакетів з їх подальшим знищенням.",
+        "height": 224,
+        "width": 1040
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -3968,
+        -96
+      ],
+      "typeVersion": 1,
+      "id": "463c3ad4-e192-479b-b674-4800875fb755",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -4736,
+        248
+      ],
+      "id": "6f1b9ef3-28c0-403d-9bc9-28a8f98cf553",
+      "name": "Manual Trigger/Ручний запуск"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "<DRIVE_OR_SHEET_ID>",
+            "mode": "id"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -4512,
+        248
+      ],
+      "id": "d5fe2fb7-5b8d-4101-af0b-0884da744dc9",
+      "name": "Find GDrive Folder/Пошук папки на GDrive",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "<GOOGLEDRIVEOAUTH2API_CRED_ID>",
+          "name": "Google Drive обробка датасету"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const fileName = $input.item.json.name;\nconst baseName = fileName.split('.')[0].toLowerCase().replace(/[^a-z0-9]/g, '-');\nconst timestamp = new Date().getTime();\nconst bucketName = `n8n-batch-${baseName}-${timestamp}`;\nconst folderName = fileName.split('.')[0];\n\nreturn {\n  project_label: baseName,\n  gdrive_audio_folder: folderName,\n  bucket_name: bucketName,\n  gcs_audio_path: `gs://${bucketName}/audio/`,\n  gcs_batch_path: `gs://${bucketName}/batch/`,\n  gcs_results_path: `gs://${bucketName}/results/`,\n  is_test: fileName.toLowerCase().includes('test')\n};"
+      },
+      "name": "Init Variables/Ініціалізація змінних",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        -4288,
+        248
+      ],
+      "typeVersion": 1,
+      "id": "e56244d5-b8d9-4cc1-8ef1-9fe6f731c9fe"
+    },
+    {
+      "parameters": {
+        "command": "=mkdir -p /opt/n8n_data/datasets/{{ $('Init Variables/Ініціалізація змінних').item.json.project_label }}\ngcloud auth activate-service-account --key-file=/opt/n8n_data/gcp-key.json && gsutil mb -p <GCP_PROJECT_ID> -l us-central1 gs://{{ $('Init Variables/Ініціалізація змінних').item.json.bucket_name }}"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        -4064,
+        248
+      ],
+      "id": "6d2b4459-ebf5-4587-8d1d-4cf2989bfebb",
+      "name": "Provision GCS Bucket/Створення бакета в хмарі",
+      "credentials": {
+        "sshPassword": {
+          "id": "<SSHPASSWORD_CRED_ID>",
+          "name": "SSH Password account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "=gcloud auth activate-service-account --key-file=/opt/n8n_data/gcp-key.json && \\\nrclone --config /opt/n8n_data/rclone/rclone.conf \\\ncopy gdrive:/{{ $('Init Variables/Ініціалізація змінних').item.json.gdrive_audio_folder }}/ \\\n:googlecloudstorage,service_account_file='/opt/n8n_data/gcp-key.json',project='<GCP_PROJECT_ID>':{{ $('Init Variables/Ініціалізація змінних').item.json.bucket_name }}/audio/ \\\n--transfers 16 -v"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        -3840,
+        248
+      ],
+      "id": "230a3df4-bf56-4793-bcc9-65421d432f64",
+      "name": "Ingest Audio (Rclone)/Копіювання аудіо (Rclone)",
+      "credentials": {
+        "sshPassword": {
+          "id": "<SSHPASSWORD_CRED_ID>",
+          "name": "SSH Password account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Find GDrive Folder/Пошук папки на GDrive').item.json.id }}",
+          "mode": ""
+        },
+        "options": {}
+      },
+      "name": "Get Metadata CSV/Завантаження метаданих",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [
+        -3616,
+        248
+      ],
+      "typeVersion": 2,
+      "id": "65e74f91-ef49-4477-92d2-6337277d5c82",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "<GOOGLEDRIVEOAUTH2API_CRED_ID>",
+          "name": "Google Drive обробка датасету"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "=WORK_DIR=\"/opt/n8n_data/datasets/{{ $('Init Variables/Ініціалізація змінних').item.json.project_label }}\"\nmkdir -p $WORK_DIR\n\n# Авторизуемся в Google Cloud\ngcloud auth activate-service-account --key-file=/opt/n8n_data/gcp-key.json\n\n# Скачиваем наш CSV прямо из бакета и сохранями как input_dataset.csv\ngsutil cp gs://{{ $('Init Variables/Ініціалізація змінних').item.json.bucket_name }}/audio/*.csv $WORK_DIR/input_dataset.csv"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        -3392,
+        248
+      ],
+      "id": "8a0fd80a-b801-4eab-a590-bb5c39327c1d",
+      "name": "Save CSV to Host/Збереження CSV на сервер",
+      "credentials": {
+        "sshPassword": {
+          "id": "<SSHPASSWORD_CRED_ID>",
+          "name": "SSH Password account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "=cd /opt/n8n_data/datasets/{{ $('Init Variables/Ініціалізація змінних').first().json.project_label }} && \\\nmkdir -p temp_chunks && \\\nrm -rf temp_chunks/* && \\\ngcloud auth activate-service-account --key-file=/opt/n8n_data/gcp-key.json && \\\npython3 -c \"\nimport pandas as pd, json, os, sys, subprocess\n\ntry:\n    bucket = '{{ $('Init Variables/Ініціалізація змінних').first().json.bucket_name }}'\n    print('Сканирую бакет...')\n    result = subprocess.run(['gsutil', 'ls', f'gs://{bucket}/**.wav'], capture_output=True, text=True)\n    real_paths = result.stdout.strip().split('\\n')\n    \n    time_map = {}\n    for p in real_paths:\n        if '___' in p:\n            time_map[p.split('___')[-1]] = p\n            \n    df = pd.read_csv('input_dataset.csv')\n    \n    chunk_size = 5000\n    total_matched = 0\n    file_count = 0\n    \n    for i in range(0, len(df), chunk_size):\n        chunk = df.iloc[i:i+chunk_size]\n        filename = f'temp_chunks/part_{i//chunk_size}.jsonl'\n        matched_in_chunk = 0\n        \n        with open(filename, 'w') as f:\n            for _, row in chunk.iterrows():\n                csv_path = str(row['file'])\n                if '___' in csv_path:\n                    csv_time = csv_path.split('___')[-1].strip()\n                    if csv_time in time_map:\n                        file_uri = time_map[csv_time]\n                        \n                        # Жорсткий промпт для нейромережі\n                        prompt_text = f\\\"REFERENCE TEXT: '{row['transcript']}'\\\\nTranscribe the audio exactly. Compare your transcription to the REFERENCE TEXT. If they match completely (ignoring punctuation), your verdict is 'OK'. If the REFERENCE TEXT has typos, wrong words, or missing words, your verdict is 'BRAK'. Output strictly in this format: VERDICT | YOUR_TRANSCRIPTION. Do not add any explanations.\\\"\n                        \n                        task = {\n                            'request': {\n                                'contents': [{\n                                    'role': 'user',\n                                    'parts': [\n                                        {'text': prompt_text},\n                                        {'fileData': {'mimeType': 'audio/wav', 'fileUri': file_uri}}\n                                    ]\n                                }]\n                            }\n                        }\n                        f.write(json.dumps(task) + '\\n')\n                        matched_in_chunk += 1\n                        total_matched += 1\n        \n        if matched_in_chunk > 0:\n            file_count += 1\n        else:\n            os.remove(filename)\n            \n    print(f'✅ SUCCESS: Создано {file_count} файлов. Всего найдено {total_matched} аудиозаписей!')\nexcept Exception as e:\n    print(f'ERROR: {e}'); sys.exit(1)\n\" && \\\ngsutil -m cp temp_chunks/*.jsonl gs://{{ $('Init Variables/Ініціалізація змінних').first().json.bucket_name }}/batch/"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        -3168,
+        248
+      ],
+      "id": "15dfa895-62aa-4cb6-aff4-4251553fd018",
+      "name": "Generate JSONL Batches/Нарізка датасету на батчі",
+      "credentials": {
+        "sshPassword": {
+          "id": "<SSHPASSWORD_CRED_ID>",
+          "name": "SSH Password account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "=ls -1 /opt/n8n_data/datasets/{{ $('Init Variables/Ініціалізація змінних').item.json.project_label }}/temp_chunks/ | grep .jsonl"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        -2944,
+        248
+      ],
+      "id": "e689dab3-a095-429c-a93a-18e8ea4d99ff",
+      "name": "List Batch Files/Сканування списку файлів",
+      "credentials": {
+        "sshPassword": {
+          "id": "<SSHPASSWORD_CRED_ID>",
+          "name": "SSH Password account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Берем stdout из предыдущего узла (список файлов текстом)\nconst stdout = $('List Batch Files/Сканування списку файлів').item.json.stdout;\n\n// Разбиваем строку на массив по переносу строки и убираем пустые элементы\nconst files = stdout.split('\\n').filter(f => f.trim() !== '');\n\n// Возвращаем каждый файл как отдельный айтем для Loop\nreturn files.map(fileName => {\n  return { json: { file_name: fileName } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2720,
+        248
+      ],
+      "id": "5073a0a1-f5ad-4a61-bbbd-64bfdfb47d32",
+      "name": "Prepare Loop Array/Підготовка масиву для циклу"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "Batch Processing Loop/Цикл обробки батчів",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [
+        -2496,
+        248
+      ],
+      "typeVersion": 2,
+      "id": "f039c437-0f9c-4520-905f-117450f38c79"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/<GCP_PROJECT_ID>/locations/us-central1/batchPredictionJobs",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ \nJSON.stringify({\n  \"displayName\": $('Init Variables/Ініціалізація змінних').item.json.project_label + \"_job_\" + new Date().getTime(),\n  \"model\": \"publishers/google/models/gemini-2.5-flash\",\n  \"inputConfig\": {\n    \"instancesFormat\": \"jsonl\",\n    \"gcsSource\": {\n      \"uris\": [\n        $('Init Variables/Ініціалізація змінних').item.json.gcs_batch_path + $('Batch Processing Loop/Цикл обробки батчів').item.json.file_name.trim()\n      ]\n    }\n  },\n  \"outputConfig\": {\n    \"predictionsFormat\": \"jsonl\",\n    \"gcsDestination\": {\n      \"outputUriPrefix\": $('Init Variables/Ініціалізація змінних').item.json.gcs_results_path\n    }\n  }\n})\n}}",
+        "options": {}
+      },
+      "name": "Submit Vertex AI Job/Запуск задачі в Vertex AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -2272,
+        56
+      ],
+      "typeVersion": 3,
+      "id": "4a3dbfa2-fb2a-4c58-9675-fa23049d1b54",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "<GOOGLEDRIVEOAUTH2API_CRED_ID>",
+          "name": "Google Drive обробка датасету"
+        },
+        "googleApi": {
+          "id": "<GOOGLEAPI_CRED_ID>",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 10,
+        "unit": "minutes"
+      },
+      "name": "Wait (10 min)/Асинхронне очікування (10хв)",
+      "type": "n8n-nodes-base.wait",
+      "position": [
+        -2048,
+        56
+      ],
+      "typeVersion": 1,
+      "id": "284e6116-9131-44f4-8ad5-d4e5f77fe081"
+    },
+    {
+      "parameters": {
+        "url": "=https://us-central1-aiplatform.googleapis.com/v1/{{ $('Submit Vertex AI Job/Запуск задачі в Vertex AI').item.json.name }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "options": {}
+      },
+      "name": "Poll Job Status/Опитування статусу задачі",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -1824,
+        32
+      ],
+      "typeVersion": 3,
+      "id": "e71b498a-36fb-4f54-9155-44c6c60c5e8c",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleApi": {
+          "id": "<GOOGLEAPI_CRED_ID>",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.state }}",
+              "value2": "JOB_STATE_SUCCEEDED"
+            },
+            {
+              "value1": "=={{ $json.state }}",
+              "value2": "JOB_STATE_SUCCEEDED"
+            },
+            {
+              "value1": "=={{ $json.state }}",
+              "value2": "JOB_STATE_PARTIALLY_SUCCEEDED"
+            },
+            {
+              "value1": "=={{ $json.state }}",
+              "value2": "JOB_STATE_FAILED"
+            }
+          ]
+        },
+        "combineOperation": "any"
+      },
+      "name": "Is Job Complete?/Задача виконана?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        -1600,
+        176
+      ],
+      "typeVersion": 1,
+      "id": "65b9a19b-0a24-4eef-97c8-1b7f29d6e9cf"
+    },
+    {
+      "parameters": {
+        "command": "=WORK_DIR=\"/opt/n8n_data/datasets/{{ $('Init Variables/Ініціалізація змінних').first().json.project_label }}\" && \\\nmkdir -p $WORK_DIR/auto_results && \\\ncd $WORK_DIR && \\\ngcloud auth activate-service-account --key-file=/opt/n8n_data/gcp-key.json && \\\ngsutil -m cp -r \"{{ $('Init Variables/Ініціалізація змінних').first().json.gcs_results_path }}*\" ./auto_results/ && \\\npython3 -c \"\nimport json, pandas as pd, os, re, sys\n\ntry:\n    files = []\n    for root, dirs, filenames in os.walk('auto_results'):\n        for filename in filenames:\n            if filename.endswith('.jsonl'):\n                files.append(os.path.join(root, filename))\n                \n    final_data = []\n    \n    for file_path in files:\n        with open(file_path, 'r', encoding='utf-8') as f:\n            for line in f:\n                if not line.strip(): continue\n                try:\n                    data = json.loads(line)\n                    req_parts = data.get('request', {}).get('contents', [{}])[0].get('parts', [])\n                    \n                    orig_text = ''\n                    audio_uri = ''\n                    \n                    for p in req_parts:\n                        if p.get('text'): \n                            # Витягуємо оригінальний текст з промпту\n                            m = re.search(r\\\"REFERENCE TEXT: '(.*?)'\\\\n\\\", p.get('text', ''), re.DOTALL)\n                            if m: orig_text = m.group(1).strip()\n                            \n                        if p.get('fileData'): \n                            audio_uri = p['fileData'].get('fileUri', '')\n                    \n                    path_parts = audio_uri.split('/')\n                    audio_file = path_parts[-1] if audio_uri else 'unknown.wav'\n                    speaker = path_parts[-2] if len(path_parts) > 1 else ''\n                    \n                    res_parts = data.get('response', {}).get('candidates', [{}])[0].get('content', {}).get('parts', [{}])\n                    res_text = res_parts[0].get('text', '') if res_parts else ''\n                    \n                    # РОЗРІЗАЄМО ВІДПОВІДЬ ПО '|'\n                    if '|' in res_text:\n                        v, t = res_text.split('|', 1)\n                        verdict = v.strip().upper()\n                        # Залишаємо тільки літери і цифри, щоб було чисто\n                        trans = re.sub(r'[^a-z0-9\\s]', '', t.lower()).strip()\n                    else:\n                        verdict = 'UNKNOWN'\n                        trans = re.sub(r'[^a-z0-9\\s]', '', res_text.lower()).strip()\n                    \n                    final_data.append({'Audio_File': audio_file, 'Speaker': speaker, 'Original_Text': orig_text, 'New_Transcript': trans, 'Verdict': verdict})\n                except Exception as ex: \n                    print(f'Пропущено рядок через помилку: {ex}')\n                    continue\n                    \n    df = pd.DataFrame(final_data).drop_duplicates(subset=['Audio_File'])\n    df.to_csv('final_ready.csv', index=False, encoding='utf-8-sig')\n    print(f'✅ SUCCESS: CSV зібрано! Знайдено {len(final_data)} рядків.')\nexcept Exception as e:\n    print(f'ERROR: {e}')\n    sys.exit(1)\n\""
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        -2272,
+        344
+      ],
+      "id": "4469447f-96f7-4a61-bbb0-db8354d1cdb7",
+      "name": "arse & Merge Results/Збірка та парсинг результатів",
+      "credentials": {
+        "sshPassword": {
+          "id": "<SSHPASSWORD_CRED_ID>",
+          "name": "SSH Password account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "=rclone --config /opt/n8n_data/rclone/rclone.conf copy /opt/n8n_data/datasets/{{ $('Init Variables/Ініціалізація змінних').first().json.project_label }}/final_ready.csv gdrive:/{{ $('Init Variables/Ініціалізація змінних').first().json.gdrive_audio_folder }}/ -v"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        -2048,
+        344
+      ],
+      "id": "5637365e-9410-47a9-8c1e-86a3e34dcec6",
+      "name": "Export Final CSV/Експорт звіту на GDrive",
+      "credentials": {
+        "sshPassword": {
+          "id": "<SSHPASSWORD_CRED_ID>",
+          "name": "SSH Password account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "<NOTIFY_EMAIL>",
+        "subject": "📊 Результати аудиту аудіо (Gemini 2.5 Flash)",
+        "message": "=<div style=\"font-family: Arial, sans-serif; color: #333333; line-height: 1.6; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 10px; padding: 25px; box-shadow: 0 4px 8px rgba(0,0,0,0.05);\">\n    \n    <div style=\"text-align: center; margin-bottom: 20px;\">\n        <h2 style=\"color: #4285F4; margin: 0;\">🤖 Аудит Датасету Завершено!</h2>\n    </div>\n\n    <p style=\"font-size: 16px;\">Привіт!</p>\n    \n    <p style=\"font-size: 16px;\">Твій n8n воркфлоу успішно обробив великий датасет через нейромережу <b>Google Gemini 2.5 Flash</b>.</p>\n\n    <div style=\"background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid #34A853; margin: 25px 0;\">\n        <p style=\"margin: 5px 0; font-size: 15px;\"><b>✅ Статус:</b> Всі батчі оброблено та склеєно</p>\n        <p style=\"margin: 5px 0; font-size: 15px;\"><b>📁 Файл:</b> final_ready.csv</p>\n        <p style=\"margin: 5px 0; font-size: 15px;\"><b>☁️ Розташування:</b> Завантажено на Google Drive у папку <b>{{ $('Init Variables/Ініціалізація змінних').first().json.gdrive_audio_folder }}</b></p>\n    </div>\n\n    <p style=\"font-size: 16px;\">Перейди у свій Google Drive у відповідну папку, щоб завантажити результати.</p>\n\n    <hr style=\"border: none; border-top: 1px solid #eeeeee; margin: 30px 0 20px 0;\" />\n    \n    <div style=\"text-align: center; font-size: 12px; color: #888888;\">\n        <p style=\"margin: 0;\">Цей лист згенеровано автоматично твоїм конвеєром в n8n 🚀</p>\n    </div>\n\n</div>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -1824,
+        344
+      ],
+      "id": "45e8a94d-1833-47e0-8024-8e6d70d48750",
+      "name": "Send HTML Report/Відправка HTML-звіту",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "<GMAILOAUTH2_CRED_ID>",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "=gcloud auth activate-service-account --key-file=/opt/n8n_data/gcp-key.json && \\\nrm -rf /opt/n8n_data/datasets/{{ $('Init Variables/Ініціалізація змінних').first().json.project_label }} && \\\ngsutil -m rm -r gs://{{ $('Init Variables/Ініціалізація змінних').first().json.bucket_name }}"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        -1600,
+        368
+      ],
+      "id": "bad231f6-f521-4ddd-9916-b6d1e04269d2",
+      "name": "Destroy Temp Resources/Очищення інфраструктури",
+      "credentials": {
+        "sshPassword": {
+          "id": "<SSHPASSWORD_CRED_ID>",
+          "name": "SSH Password account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger/Ручний запуск": {
+      "main": [
+        [
+          {
+            "node": "Find GDrive Folder/Пошук папки на GDrive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find GDrive Folder/Пошук папки на GDrive": {
+      "main": [
+        [
+          {
+            "node": "Init Variables/Ініціалізація змінних",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Variables/Ініціалізація змінних": {
+      "main": [
+        [
+          {
+            "node": "Provision GCS Bucket/Створення бакета в хмарі",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provision GCS Bucket/Створення бакета в хмарі": {
+      "main": [
+        [
+          {
+            "node": "Ingest Audio (Rclone)/Копіювання аудіо (Rclone)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ingest Audio (Rclone)/Копіювання аудіо (Rclone)": {
+      "main": [
+        [
+          {
+            "node": "Get Metadata CSV/Завантаження метаданих",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Metadata CSV/Завантаження метаданих": {
+      "main": [
+        [
+          {
+            "node": "Save CSV to Host/Збереження CSV на сервер",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save CSV to Host/Збереження CSV на сервер": {
+      "main": [
+        [
+          {
+            "node": "Generate JSONL Batches/Нарізка датасету на батчі",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate JSONL Batches/Нарізка датасету на батчі": {
+      "main": [
+        [
+          {
+            "node": "List Batch Files/Сканування списку файлів",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Batch Files/Сканування списку файлів": {
+      "main": [
+        [
+          {
+            "node": "Prepare Loop Array/Підготовка масиву для циклу",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Loop Array/Підготовка масиву для циклу": {
+      "main": [
+        [
+          {
+            "node": "Batch Processing Loop/Цикл обробки батчів",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Processing Loop/Цикл обробки батчів": {
+      "main": [
+        [
+          {
+            "node": "Submit Vertex AI Job/Запуск задачі в Vertex AI",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "arse & Merge Results/Збірка та парсинг результатів",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Vertex AI Job/Запуск задачі в Vertex AI": {
+      "main": [
+        [
+          {
+            "node": "Wait (10 min)/Асинхронне очікування (10хв)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait (10 min)/Асинхронне очікування (10хв)": {
+      "main": [
+        [
+          {
+            "node": "Poll Job Status/Опитування статусу задачі",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Job Status/Опитування статусу задачі": {
+      "main": [
+        [
+          {
+            "node": "Is Job Complete?/Задача виконана?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Job Complete?/Задача виконана?": {
+      "main": [
+        [
+          {
+            "node": "Batch Processing Loop/Цикл обробки батчів",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait (10 min)/Асинхронне очікування (10хв)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "arse & Merge Results/Збірка та парсинг результатів": {
+      "main": [
+        [
+          {
+            "node": "Export Final CSV/Експорт звіту на GDrive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Export Final CSV/Експорт звіту на GDrive": {
+      "main": [
+        [
+          {
+            "node": "Send HTML Report/Відправка HTML-звіту",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send HTML Report/Відправка HTML-звіту": {
+      "main": [
+        [
+          {
+            "node": "Destroy Temp Resources/Очищення інфраструктури",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

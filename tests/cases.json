@@ -1,0 +1,122 @@
+{
+  "normalize": [
+    {"in": "Hello, World!", "out": "hello world"},
+    {"in": "  Ini  adalah—teks. ", "out": "ini adalah teks"},
+    {"in": "ශ්‍රී ලංකා.", "out": "ශ්රී ලංකා"},
+    {"in": "Café", "out": "café"},
+    {"in": "$100 + 5%", "out": "100 5"},
+    {"in": "", "out": ""},
+    {"in": "வணக்கம்!", "out": "வணக்கம்"}
+  ],
+  "metrics": [
+    {"ref": "ini adalah teks", "hyp": "ini adalah teks", "wer": 0.0, "cer": 0.0},
+    {"ref": "ini adalah teks", "hyp": "ini teks", "wer": 0.333, "cer": 0.462},
+    {"ref": "a b c d", "hyp": "a x c d e", "wer": 0.5, "cer": 0.5},
+    {"ref": "", "hyp": "", "wer": 0.0, "cer": 0.0},
+    {"ref": "", "hyp": "x", "wer": 1.0, "cer": 1.0},
+    {"ref": "Hello, World", "hyp": "hello world", "wer": 0.0, "cer": 0.0}
+  ],
+  "matching": [
+    {
+      "name": "exact paths",
+      "rows": [
+        {"file": "audio/speaker_0/A___00h00m00.000---00h00m01.000.wav"},
+        {"file": "audio/speaker_1/A___00h00m01.000---00h00m02.000.wav"}
+      ],
+      "files": [
+        {"id": "f1", "path": "speaker_0/A___00h00m00.000---00h00m01.000.wav"},
+        {"id": "f2", "path": "speaker_1/A___00h00m01.000---00h00m02.000.wav"},
+        {"id": "f3", "path": "speaker_1/Z___00h09m00.000---00h09m01.000.wav"}
+      ],
+      "expect": [["EXACT", "f1"], ["EXACT", "f2"]],
+      "orphans": ["f3"]
+    },
+    {
+      "name": "recording ids differ (Bahasa): speaker + timecode",
+      "rows": [{"file": "audio/speaker_0/7z9hloC1sQp___00h00m00.000---00h00m28.150.wav"}],
+      "files": [
+        {"id": "f1", "path": "speaker_0/5dd4fab2___00h00m00.000---00h00m28.150.wav"},
+        {"id": "f2", "path": "speaker_1/9abc1234___00h00m00.000---00h00m28.150.wav"}
+      ],
+      "expect": [["SPEAKER_TIMECODE", "f1"]],
+      "orphans": ["f2"]
+    },
+    {
+      "name": "flat folder, same timecode twice: ambiguous",
+      "rows": [{"file": "audio/speaker_3/zz___00h00m05.000---00h00m06.000.wav"}],
+      "files": [
+        {"id": "f1", "path": "x1___00h00m05.000---00h00m06.000.wav"},
+        {"id": "f2", "path": "x2___00h00m05.000---00h00m06.000.wav"}
+      ],
+      "expect": [["AMBIGUOUS", null]],
+      "orphans": ["f1", "f2"]
+    },
+    {
+      "name": "flat folder, same basename: exact",
+      "rows": [{"file": "audio/speaker_3/zz___00h00m05.000---00h00m06.000.wav"}],
+      "files": [{"id": "f1", "path": "zz___00h00m05.000---00h00m06.000.wav"}],
+      "expect": [["EXACT", "f1"]],
+      "orphans": []
+    },
+    {
+      "name": "missing file and no timecode",
+      "rows": [
+        {"file": "audio/speaker_0/no_timecode.wav"},
+        {"file": "audio/speaker_0/q___00h01m00.000---00h01m01.000.wav"}
+      ],
+      "files": [],
+      "expect": [["MISSING", null], ["MISSING", null]],
+      "orphans": []
+    },
+    {
+      "name": "a file is claimed only once",
+      "rows": [
+        {"file": "audio/s/a1___00h00m07.000---00h00m08.000.wav"},
+        {"file": "audio/s/a2___00h00m07.000---00h00m08.000.wav"}
+      ],
+      "files": [{"id": "f1", "path": "s/a2___00h00m07.000---00h00m08.000.wav"}],
+      "expect": [["MISSING", null], ["EXACT", "f1"]],
+      "orphans": []
+    },
+    {
+      "name": "windows separators and spaces",
+      "rows": [{"file": " audio\\speaker_2\\b___00h00m01.000---00h00m02.000.wav "}],
+      "files": [{"id": "f9", "path": "speaker_2/b___00h00m01.000---00h00m02.000.wav"}],
+      "expect": [["EXACT", "f9"]],
+      "orphans": []
+    }
+  ],
+  "parse": [
+    {"name": "json ok", "verdict": "OK", "transcription": "ini teks",
+     "resp": {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "{\"verdict\":\"ok\",\"transcription\":\"ini teks\",\"issues\":[]}"}]}}]}},
+    {"name": "fenced json", "verdict": "BRAK", "transcription": "x",
+     "resp": {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "```json\n{\"verdict\":\"BRAK\",\"transcription\":\"x\",\"issues\":[\"a\"]}\n```"}]}}]}},
+    {"name": "legacy pipe format", "verdict": "OK", "transcription": "ini adalah teks",
+     "resp": {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "**OK** | ini adalah teks"}]}}]}},
+    {"name": "thought parts skipped", "verdict": "MINOR", "transcription": "y",
+     "resp": {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "thinking...", "thought": true}, {"text": "{\"verdict\":\"MINOR\",\"transcription\":\"y\"}"}]}}]}},
+    {"name": "batch status error", "verdict": "ERROR", "error_starts": "batch status",
+     "resp": null, "status": {"code": 3, "message": "bad"}},
+    {"name": "prompt blocked", "verdict": "ERROR", "error_starts": "blocked: PROHIBITED_CONTENT",
+     "resp": {"promptFeedback": {"blockReason": "PROHIBITED_CONTENT"}}},
+    {"name": "finish prohibited, no text", "verdict": "ERROR", "error_starts": "finishReason PROHIBITED_CONTENT",
+     "resp": {"candidates": [{"finishReason": "PROHIBITED_CONTENT"}]}},
+    {"name": "empty answer", "verdict": "ERROR", "error_starts": "empty answer",
+     "resp": {"candidates": [{"finishReason": "STOP", "content": {"parts": []}}]}},
+    {"name": "bad verdict", "verdict": "ERROR", "error_starts": "bad verdict",
+     "resp": {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "{\"verdict\":\"MAYBE\",\"transcription\":\"z\"}"}]}}]}},
+    {"name": "free text", "verdict": "ERROR", "error_starts": "unparseable",
+     "resp": {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "I think it is fine"}]}}]}},
+    {"name": "json array is not an answer", "verdict": "ERROR", "error_starts": "unparseable",
+     "resp": {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "[1,2]"}]}}]}},
+    {"name": "max tokens but valid", "verdict": "OK", "transcription": "",
+     "resp": {"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": "{\"verdict\":\"OK\",\"transcription\":null}"}]}}]}}
+  ],
+  "assess": [
+    {"ref": "a b c d", "hyp": "a x c d e", "verdict": "OK", "flag": "CHECK"},
+    {"ref": "a b c d", "hyp": "a b c d", "verdict": "OK", "flag": ""},
+    {"ref": "a b c d", "hyp": "a b c d", "verdict": "BRAK", "flag": "CHECK"},
+    {"ref": "ini adalah teks", "hyp": "ini teks", "verdict": "BRAK", "flag": ""},
+    {"ref": "a b c d", "hyp": "x", "verdict": "MINOR", "flag": ""}
+  ]
+}

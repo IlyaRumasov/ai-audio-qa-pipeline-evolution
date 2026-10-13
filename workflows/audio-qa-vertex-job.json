@@ -1,0 +1,582 @@
+{
+  "name": "[Audio AI-QA] B. Задача Vertex (підфлоу)",
+  "nodes": [
+    {
+      "id": "fa93e317-51e6-59ea-8d98-0f25a5f1ee29",
+      "name": "Опис флоу",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "content": "# Audio AI-QA · B. Підфлоу: одна задача Vertex AI Batch\nВикликається двічі з «B. Пакетна перевірка». Вихід: {ok: true, data} на кожен файл результатів\nабо {ok: false, phase, state, error} після скасування задачі.",
+        "width": 2290,
+        "height": 134,
+        "color": 1
+      }
+    },
+    {
+      "id": "59af705a-e24f-5e81-81a9-b5740232d811",
+      "name": "Рамка 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        120
+      ],
+      "parameters": {
+        "content": "## 1. Запуск і очікування\nзадача → чекати N хв → стан",
+        "width": 1340,
+        "height": 380,
+        "color": 7
+      }
+    },
+    {
+      "id": "445b71a1-4ab3-5dc4-b40f-81fac5ff01c6",
+      "name": "Рамка 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1390,
+        120
+      ],
+      "parameters": {
+        "content": "## 2. Результати\nфайли predictions з бакета",
+        "width": 900,
+        "height": 380,
+        "color": 5
+      }
+    },
+    {
+      "id": "cb6648bb-1761-5394-a140-1d266e327f99",
+      "name": "Рамка 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        590
+      ],
+      "parameters": {
+        "content": "## Збій або таймаут\nще чекати? ні → скасувати → повернути помилку",
+        "width": 680,
+        "height": 380,
+        "color": 3
+      }
+    },
+    {
+      "id": "0daa3dd3-8692-5500-832d-2a30a71f4829",
+      "name": "Вхід",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        70,
+        290
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "stage",
+              "type": "string"
+            },
+            {
+              "name": "gcp_project",
+              "type": "string"
+            },
+            {
+              "name": "gcp_location",
+              "type": "string"
+            },
+            {
+              "name": "bucket",
+              "type": "string"
+            },
+            {
+              "name": "model",
+              "type": "string"
+            },
+            {
+              "name": "input_object",
+              "type": "string"
+            },
+            {
+              "name": "output_prefix",
+              "type": "string"
+            },
+            {
+              "name": "display_name",
+              "type": "string"
+            },
+            {
+              "name": "poll_minutes",
+              "type": "number"
+            },
+            {
+              "name": "max_wait_hours",
+              "type": "number"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "5e75dffa-c920-52b8-8cee-fec292366572",
+      "name": "Vertex: створити задачу",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        290,
+        290
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "method": "POST",
+        "url": "=https://{{ $('Вхід').first().json.gcp_location }}-aiplatform.googleapis.com/v1/projects/{{ $('Вхід').first().json.gcp_project }}/locations/{{ $('Вхід').first().json.gcp_location }}/batchPredictionJobs",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ displayName: $('Вхід').first().json.display_name, model: 'publishers/google/models/' + $('Вхід').first().json.model, inputConfig: { instancesFormat: 'jsonl', gcsSource: { uris: ['gs://' + $('Вхід').first().json.bucket + '/' + $('Вхід').first().json.input_object] } }, outputConfig: { predictionsFormat: 'jsonl', gcsDestination: { outputUriPrefix: 'gs://' + $('Вхід').first().json.bucket + '/' + $('Вхід').first().json.output_prefix } } }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "<GCP_SA_CRED_ID>",
+          "name": "Google Service Account (GCS + Vertex AI)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "id": "ed8943c6-d8fb-5f21-981e-d80c05b5a30b",
+      "name": "Чекати N хвилин",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        510,
+        290
+      ],
+      "parameters": {
+        "amount": "={{ $('Вхід').first().json.poll_minutes }}",
+        "unit": "minutes"
+      },
+      "webhookId": "fe714005-ffe6-5479-9446-1b181c0a43af"
+    },
+    {
+      "id": "a1dbe1f4-eba2-5744-80f8-e386ea3a9ea5",
+      "name": "Vertex: стан задачі",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        730,
+        290
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "url": "=https://{{ $('Вхід').first().json.gcp_location }}-aiplatform.googleapis.com/v1/{{ $('Vertex: створити задачу').first().json.name }}",
+        "options": {}
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "<GCP_SA_CRED_ID>",
+          "name": "Google Service Account (GCS + Vertex AI)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 30000
+    },
+    {
+      "id": "15fa7c79-57fa-5ae6-ad8c-92fee3149c72",
+      "name": "Стан задачі",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        950,
+        290
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const inp = $('Вхід').first().json;\nconst job = $input.first().json;\nconst created = $('Vertex: створити задачу').first().json;\nconst state = job.state || '';\nconst hours = (Date.now() - new Date(job.createTime || created.createTime).getTime()) / 3.6e6;\nlet phase = 'wait';\nif (['JOB_STATE_SUCCEEDED', 'JOB_STATE_PARTIALLY_SUCCEEDED'].includes(state)) phase = 'done';\nelse if (['JOB_STATE_FAILED', 'JOB_STATE_CANCELLED', 'JOB_STATE_CANCELLING', 'JOB_STATE_EXPIRED'].includes(state)) phase = 'failed';\nelse if (hours > Number(inp.max_wait_hours)) phase = 'timeout';\nconst outDir = (job.outputInfo || {}).gcsOutputDirectory || '';\nreturn [{ json: { stage: String(inp.stage), phase, state, hours: Math.round(hours * 10) / 10, job_name: job.name || created.name,\n  error: job.error ? (job.error.message || JSON.stringify(job.error)) : '',\n  out_prefix: outDir.replace('gs://' + inp.bucket + '/', '').replace(/\\/?$/, '/'), stats: job.completionStats || {} } }];\n"
+      }
+    },
+    {
+      "id": "4545a8f9-7818-5750-835d-bf72fb3771a7",
+      "name": "Готово?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1170,
+        290
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dd648046-8039-5062-812c-3176da9c1003",
+              "leftValue": "={{ $json.phase }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6917cd07-c977-5599-afd6-63ed97e9e1be",
+      "name": "Ще чекати?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        70,
+        760
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4b635bcb-7548-5ba0-9199-3f7894cfaecc",
+              "leftValue": "={{ $json.phase }}",
+              "rightValue": "wait",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a900374b-276f-5f73-ac00-5f2de1d627ba",
+      "name": "GCS: список результатів",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1460,
+        290
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "url": "=https://storage.googleapis.com/storage/v1/b/{{ $('Вхід').first().json.bucket }}/o",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "prefix",
+              "value": "={{ $json.out_prefix }}"
+            },
+            {
+              "name": "fields",
+              "value": "items(name),nextPageToken"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "pageToken",
+                    "value": "={{ $response.body.nextPageToken }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.nextPageToken }}",
+              "limitPagesFetched": true,
+              "maxRequests": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "<GCP_SA_CRED_ID>",
+          "name": "Google Service Account (GCS + Vertex AI)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000,
+      "executeOnce": true
+    },
+    {
+      "id": "f66ab823-17d9-5fef-938d-16721821409f",
+      "name": "Файли результатів",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        290
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const out = [];\nfor (const it of $input.all()) for (const o of (it.json.items || [])) if (/\\.jsonl$/.test(o.name)) out.push({ json: { name: o.name } });\nif (!out.length) throw new Error('Vertex не записав жодного файлу результатів.');\nreturn out;\n"
+      }
+    },
+    {
+      "id": "6441e4c3-8018-52c7-95b7-48d57a9f52a8",
+      "name": "GCS: завантажити результат",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        290
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "url": "=https://storage.googleapis.com/storage/v1/b/{{ $('Вхід').first().json.bucket }}/o/{{ encodeURIComponent($json.name) }}?alt=media",
+        "options": {
+          "timeout": 600000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "<GCP_SA_CRED_ID>",
+          "name": "Google Service Account (GCS + Vertex AI)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "id": "e0c74ff6-8443-5e90-be7d-80e46906d78c",
+      "name": "Результат: успіх",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2120,
+        290
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const st = $('Стан задачі').first().json;\nreturn $input.all().map(i => ({ json: { ok: true, stage: st.stage, job_name: st.job_name, stats: st.stats, data: i.json.data } }));\n"
+      }
+    },
+    {
+      "id": "59ca36f2-693c-5603-a257-fd4ec72cbcbc",
+      "name": "Vertex: скасувати задачу",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        290,
+        760
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "method": "POST",
+        "url": "=https://{{ $('Вхід').first().json.gcp_location }}-aiplatform.googleapis.com/v1/{{ $json.job_name }}:cancel",
+        "options": {}
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "<GCP_SA_CRED_ID>",
+          "name": "Google Service Account (GCS + Vertex AI)"
+        }
+      },
+      "retryOnFail": false,
+      "maxTries": 3,
+      "waitBetweenTries": 10000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "07adfda3-c598-57f2-a643-c28a04da1eab",
+      "name": "Результат: помилка",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        510,
+        760
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "return [{ json: Object.assign({ ok: false }, $('Стан задачі').first().json) }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Вхід": {
+      "main": [
+        [
+          {
+            "node": "Vertex: створити задачу",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vertex: створити задачу": {
+      "main": [
+        [
+          {
+            "node": "Чекати N хвилин",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Чекати N хвилин": {
+      "main": [
+        [
+          {
+            "node": "Vertex: стан задачі",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vertex: стан задачі": {
+      "main": [
+        [
+          {
+            "node": "Стан задачі",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Стан задачі": {
+      "main": [
+        [
+          {
+            "node": "Готово?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Готово?": {
+      "main": [
+        [
+          {
+            "node": "GCS: список результатів",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ще чекати?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ще чекати?": {
+      "main": [
+        [
+          {
+            "node": "Чекати N хвилин",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Vertex: скасувати задачу",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vertex: скасувати задачу": {
+      "main": [
+        [
+          {
+            "node": "Результат: помилка",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GCS: список результатів": {
+      "main": [
+        [
+          {
+            "node": "Файли результатів",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Файли результатів": {
+      "main": [
+        [
+          {
+            "node": "GCS: завантажити результат",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GCS: завантажити результат": {
+      "main": [
+        [
+          {
+            "node": "Результат: успіх",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "<ERROR_WORKFLOW_ID>",
+    "saveManualExecutions": true
+  }
+}

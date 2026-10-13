@@ -1,0 +1,389 @@
+{
+  "name": "AI Quality Assurance Bot (ШІ-бот контролю якості)",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        -88
+      ],
+      "id": "6821400f-c6b8-4d1e-b299-3510f5bbfbe4",
+      "name": "Start Process / Ручний запуск"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "<DRIVE_OR_SHEET_ID>",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        48,
+        -88
+      ],
+      "id": "72d676e7-6e54-419e-82b8-9a733ec57022",
+      "name": "Download CSV Dataset / Завантаження CSV Датасету",
+      "executeOnce": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "<GOOGLEDRIVEOAUTH2API_CRED_ID>",
+          "name": "Google Drive WAV Verification"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        -88
+      ],
+      "id": "8875425e-1e16-48c8-ac08-86c0a729779e",
+      "name": "Parse CSV Data / Читання даних CSV",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "queryString": "=",
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "<DRIVE_OR_SHEET_ID>",
+            "mode": "id"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        496,
+        -88
+      ],
+      "id": "3fbf8698-b68f-4f1e-9f98-b221a374dab0",
+      "name": "List Audio Files / Пошук аудіофайлів",
+      "executeOnce": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "<GOOGLEDRIVEOAUTH2API_CRED_ID>",
+          "name": "Google Drive WAV Verification"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        720,
+        -88
+      ],
+      "id": "c9779eb3-c7f1-4c90-92fb-7bd41000cb3b",
+      "name": "Loop: Process Each Audio / Цикл: Обробка файлів"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        944,
+        -160
+      ],
+      "id": "9ecac386-09e1-4834-b5f2-12fd5bf2323b",
+      "name": "Download Current Audio / Завантаження поточного аудіо",
+      "executeOnce": false,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "<GOOGLEDRIVEOAUTH2API_CRED_ID>",
+          "name": "Google Drive WAV Verification"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.1-flash-lite-preview",
+          "mode": "list",
+          "cachedResultName": "models/gemini-3.1-flash-lite-preview"
+        },
+        "text": "==\"Прослухай це аудіо. У датасеті транскрибатор написав такий текст: '\" + $('Parse CSV Data / Читання даних CSV').all().find(r => (r.json.file || \"\").includes($('Loop: Process Each Audio / Цикл: Обробка файлів').item.json.name.match(/\\d{2}h\\d{2}m\\d{2}\\.\\d{3}---\\d{2}h\\d{2}m\\d{2}\\.\\d{3}/)[0])).json.transcript + \"'. \\n\\nТвоє завдання — жорстко оцінити якість тексту. ПРАВИЛА:\\n1. Вердикт: Напиши 'OK', якщо текст збігається. Напиши 'BRAK', якщо текст — маячня або інша мова.\\n2. Транскрипція: ПИШИ ТІЛЬКИ ЛАТИНСЬКИМИ ЛІТЕРАМИ (A-Z). КАТЕГОРИЧНО ЗАБОРОНЕНО ВИКОРИСТОВУВАТИ КИРИЛИЦЮ (українські чи російські літери).\\n3. ФОРМАТ ВІДПОВІДІ: [Вердикт] | [Транскрипція латиницею]. Наприклад: OK | ini adalah teks\"",
+        "inputType": "binary",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        1168,
+        -160
+      ],
+      "id": "20e3aa4d-ab10-476e-943a-18e18dbfb14d",
+      "name": "AI: Validate Transcript / ШІ: Валідація транскрипції",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "notesInFlow": false,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "<GOOGLEPALMAPI_CRED_ID>",
+          "name": "Gemini API key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Берем результат от Gemini\nconst geminiResult = $json;\nlet geminiResponse = \"\";\n\nif (geminiResult.content && geminiResult.content.parts && geminiResult.content.parts.length > 0) {\n    geminiResponse = geminiResult.content.parts[0].text;\n} else {\n    geminiResponse = geminiResult.text || geminiResult.output || \"БРАК | Текст не распознан\";\n}\n\n// 2. Разбиваем ответ на Вердикт (OK/БРАК) и Транскрипцию по символу \"|\"\nlet verdict = \"ОШИБКА АНАЛИЗА\";\nlet llmTranscript = geminiResponse;\n\nif (geminiResponse.includes('|')) {\n    const parts = geminiResponse.split('|');\n    verdict = parts[0].trim(); // Берем то, что до палочки (OK или БРАК)\n    // Берем всё, что после палочки (на случай если в самом тексте тоже будет символ |)\n    llmTranscript = parts.slice(1).join('|').trim(); \n} else {\n    // Если Gemini забыл поставить разделитель\n    verdict = \"БЕЗ ВЕРДИКТА\";\n    llmTranscript = geminiResponse;\n}\n\n// 3. Берем данные текущего файла из ноды цикла\nconst currentFile = $('Loop: Process Each Audio / Цикл: Обробка файлів').item.json;\n\n// 4. Берем весь датасет\nconst datasetRows = $('Parse CSV Data / Читання даних CSV').all();\n\nconst fileName = currentFile.name || \"unknown\";\nconst timecodeRegex = /\\d{2}h\\d{2}m\\d{2}\\.\\d{3}---\\d{2}h\\d{2}m\\d{2}\\.\\d{3}/;\n\n// Ищем таймкод\nconst fileMatch = fileName.match(timecodeRegex);\nconst fileTimecode = fileMatch ? fileMatch[0] : null;\n\nlet originalTranscript = \"Не найден в датасете\";\nlet speaker = \"Неизвестен\";\n\nif (fileTimecode) {\n    const row = datasetRows.find(r => (r.json.file || \"\").includes(fileTimecode));\n    if (row) {\n        originalTranscript = row.json.transcript || row.json.corrected_transcript;\n        speaker = row.json.speaker;\n    }\n}\n\n// ВОЗВРАЩАЕМ ДАННЫЕ ВМЕСТЕ С НОВОЙ КОЛОНКОЙ \"Вердикт\"\nreturn {\n    \"Имя файла\": fileName,\n    \"Спикер\": speaker,\n    \"Вердикт\": verdict,\n    \"Оригинальный текст (Dataset)\": originalTranscript,\n    \"Текст от LLM (Gemini)\": llmTranscript\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        -160
+      ],
+      "id": "c526fdad-27a7-45cb-b4e0-ed685e9c82a1",
+      "name": "Parse AI Response / Форматування результатів"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "<DRIVE_OR_SHEET_ID>",
+          "mode": "list",
+          "cachedResultName": "Results",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Аркуш1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Имя файла": "={{ $json['Имя файла'] }}",
+            "Спикер": "={{ $json['Спикер'] }}",
+            "Оригинальный текст (Dataset)": "={{ $json['Оригинальный текст (Dataset)'] }}",
+            "Текст от LLM (Gemini)": "={{ $json['Текст от LLM (Gemini)'] }}",
+            "Вердикт": "={{ $json[\"Вердикт\"] }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Имя файла",
+              "displayName": "Имя файла",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Спикер",
+              "displayName": "Спикер",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Оригинальный текст (Dataset)",
+              "displayName": "Оригинальный текст (Dataset)",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Текст от LLM (Gemini)",
+              "displayName": "Текст от LLM (Gemini)",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Вердикт",
+              "displayName": "Вердикт",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1616,
+        -88
+      ],
+      "id": "ebfaa192-808d-49fb-9a08-62beae6fca7c",
+      "name": "Log Result to Google Sheets / Запис результату в Таблицю",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "<GOOGLESHEETSOAUTH2API_CRED_ID>",
+          "name": "Google Sheets account (new)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "📋 AI-Driven Audio Transcript Validation System\nЗадача: Автоматизована перевірка якості (QA) транскрипцій у великих датасетах (~154 000 ітемів / 301 год аудіо).\n\nОсновний функціонал:\n\nIngestion: Завантаження CSV-датасету та мапінг аудіофайлів з Google Drive за таймкодами.\n\nProcessing: Циклічна обробка сегментів для дотримання лімітів API та стабільності системи.\n\nAI Analysis: Мультимодальний аналіз (Audio + Text) за допомогою моделі Gemini 3.1 Flash Lite.\n\nVerification: Порівняння тексту транскрибатора з \"еталонним\" розпізнаванням ШІ.\n\nReporting: Автоматичне формування звіту в Google Sheets з вердиктами (OK / BRAK) та виправленнями.\n\nЕкономічна вигода: * ROI: Скорочення витрат на валідацію в ~1000 разів (з $3000+ до <$5 за весь масив даних).\n\nTime-to-Market: Обробка всього датасету за кілька годин замість тижнів ручної праці.",
+        "height": 320,
+        "width": 976
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        256,
+        208
+      ],
+      "typeVersion": 1,
+      "id": "6edb9622-0965-42f9-9f25-b850b29800d6",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "Start Process / Ручний запуск": {
+      "main": [
+        [
+          {
+            "node": "Download CSV Dataset / Завантаження CSV Датасету",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download CSV Dataset / Завантаження CSV Датасету": {
+      "main": [
+        [
+          {
+            "node": "Parse CSV Data / Читання даних CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CSV Data / Читання даних CSV": {
+      "main": [
+        [
+          {
+            "node": "List Audio Files / Пошук аудіофайлів",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Audio Files / Пошук аудіофайлів": {
+      "main": [
+        [
+          {
+            "node": "Loop: Process Each Audio / Цикл: Обробка файлів",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop: Process Each Audio / Цикл: Обробка файлів": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Download Current Audio / Завантаження поточного аудіо",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Current Audio / Завантаження поточного аудіо": {
+      "main": [
+        [
+          {
+            "node": "AI: Validate Transcript / ШІ: Валідація транскрипції",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Validate Transcript / ШІ: Валідація транскрипції": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response / Форматування результатів",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response / Форматування результатів": {
+      "main": [
+        [
+          {
+            "node": "Log Result to Google Sheets / Запис результату в Таблицю",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Result to Google Sheets / Запис результату в Таблицю": {
+      "main": [
+        [
+          {
+            "node": "Loop: Process Each Audio / Цикл: Обробка файлів",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

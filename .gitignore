@@ -1,0 +1,11 @@
+context/
+.raw/
+*.key
+*.json.key
+gcp-key*.json
+.env
+__pycache__/
+*.pyc
+*.wav
+*.csv
+!tests/fixtures/*.csv
